@@ -13,7 +13,7 @@
 #include <netinet/ether.h>
 #include <unistd.h>
 
-#define BUFSIZE 1024
+#define BUFSIZE 2048
 #define DEFAULTIF "enp37s0"
 #define MAXLINE 16
 
@@ -41,7 +41,7 @@ void ethListen(const char *ethif, const uint16_t prot){
 		struct iphdr *iph = (struct iphdr*) (buf + sizeof(struct ether_header));
 		struct udphdr *edph = (struct udphdr*) (buf + sizeof(struct iphdr) + sizeof(struct ether_header));
 
-		if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(protocol))) == -1){
+		if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1){
 			perror("listener: socket");
 			close(sockfd);
 			exit(EXIT_FAILURE);
@@ -69,26 +69,37 @@ repeat:
 		numbytes = recvfrom(sockfd, buf, BUFSIZE, 0, NULL, NULL);
 		currtime = (int)time(NULL);
 
-		printf("[%d] %04X\n", currtime, htons(eh->ether_type));
-		for (i = 0; i < numbytes;){
-			for(l = 0; l < MAXLINE; l++){
-				printf("%02x ", buf[i]);
-				i++;
-			}
-			printf("   ");
-			for(l = i - MAXLINE; l < (MAXLINE + i); l++){
-				if((int)buf[l] > 31 && (int)buf[l] < 127)
-					printf("%1c", buf[l]);
-				else
-					printf("%1c", '.');
+		if(htons(eh->ether_type) == protocol){
+			if(htons(eh->ether_type) == 0x0806){
+				printf("[%d] protocol:%04X type:%02X\n", currtime, htons(eh->ether_type), buf[21]);
+				printf("Sender Mac: [%02X.%02X.%02X.%02X.%02X.%02X]\n", buf[22], buf[23], buf[24], buf[25], buf[26], buf[27]);
+				printf("Sender IP: [%d.%d.%d.%d]\n", buf[28], buf[29], buf[30], buf[31]);
+				/*printf("Sender Mac: [%02X.%02X.%02X.%02X.%02X.%02X]\n", buf[22], buf[23], buf[24], buf[25], buf[26], buf[27]);
+				printf("Sender IP: [%d.%d.%d.%d]\n", buf[28], buf[29], buf[30], buf[31]);*/
+			} else
+				printf("[%d] protocol:%04X\n", currtime, htons(eh->ether_type));
+			for (i = 0; i < numbytes;){
+				for(l = 0; l < MAXLINE; l++){
+					if((l % ((MAXLINE) / 2)) == 0)
+						printf(" ");
+					printf("%02x ", buf[i]);
+					i++;
+				}
+				printf("   ");
+				for(l = i - MAXLINE; l < (MAXLINE + i); l++){
+					if((int)buf[l] > 31 && (int)buf[l] < 127)
+						printf("%1c", buf[l]);
+					else
+						printf("%1c", '.');
+				}
+				printf("\n");
 			}
 			printf("\n");
+			fflush(stdout);
 		}
-		printf("\n");
-		fflush(stdout);
 		goto repeat;
 }
-//
+
 int main(int argc, char **argv, char **envp){
 		char *etherif = NULL;
 		uint16_t protocol = 0;
