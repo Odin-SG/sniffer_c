@@ -1,7 +1,7 @@
 #include <arpa/inet.h>
-#include <linux/if_packet.h>
+//#include <linux/if_packet.h>
 #include <linux/ip.h>
-#include <linux/udp.h>
+//#include <linux/udp.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -9,27 +9,33 @@
 #include <sys/socket.h>
 #include <net/if.h>
 #include <netinet/ether.h>
+#include <unistd.h>
 
 #define BUFSIZE 1024
 #define DEFAULTIF "enp37s0"
 #define MAXLINE 16
 
-void ethListen(){
+void ethListen(const char *ethif){
 		uint8_t buf[BUFSIZE];
-		char ifName[IFNAMSIZ] = DEFAULTIF;
+		char ifName[IFNAMSIZ];
 		ssize_t numbytes;
+
+		if(ethif)
+			strcpy(ifName, ethif);
+		else
+			strcpy(ifName, DEFAULTIF);
 
 		struct ifreq ifopts;
 		struct ifreq if_ip;
 		struct sockaddr_storage their_addr;
 
-		int sockfd, ret, i, l, n;
+		int sockfd, i, l, n;
 		int sockopt = 1;
 		struct ether_header *eh = (struct ether_header*) buf;
 		struct iphdr *iph = (struct iphdr*) (buf + sizeof(struct ether_header));
-		struct udbhdr *edph = (struct udphdr*) (buf + sizeof(struct iphdr) + sizeof(struct ether_header));
+		struct udphdr *edph = (struct udphdr*) (buf + sizeof(struct iphdr) + sizeof(struct ether_header));
 
-		if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(0x0800))) == -1){
+		if ((sockfd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1){
 			perror("listener: socket");
 			close(sockfd);
 			exit(EXIT_FAILURE);
@@ -59,6 +65,7 @@ repeat:
 		numbytes = recvfrom(sockfd, buf, BUFSIZE, 0, NULL, NULL);
 
 		printf("\tData:\n");
+		printf("%04X\n", htons(eh->ether_type));
 		for (i = 0; i < numbytes;){
 			for(l = 0; l < MAXLINE; l++){
 				printf("%02x ", buf[i]);
@@ -77,7 +84,11 @@ repeat:
 		fflush(stdout);
 		goto repeat;
 }
-
+//
 int main(int argc, char **argv){
-        ethListen();
+		char *etherif = NULL;
+		if(argv[1]){
+			etherif = argv[1];
+		}
+        ethListen(etherif);
 }
