@@ -60,14 +60,12 @@ int find_in_array(const struct arp_table *table, char type, const uint8_t *val){
 					if(table[step].ip[i] != val[i])
 						return -1;
 				}
-				printf("Attack! This ip is trying to bind to this mac! Position on table %d\n", step);
 				return step;
 			case 'm':
 				for(int i = 0; i < MACSIZE; i++){
 					if(table[step].mac[i] != val[i])
 						return -1;
 				}
-				printf("Attack! This mac is trying to bind to this ip! Position on table %d\n", step);
 				return step;
 			default:
 				return -1;
@@ -81,6 +79,8 @@ void add_to_table(struct arp_table *table, uint8_t *buf){
 	currpoint = point;
 
 	if((err = find_in_array(table, 'i',  &buf[38])) != -1){
+		if(find_in_array(table, 'm', &buf[32]) == -1)
+			printf("Attack! This ip is trying to bind to this mac! Position on table %d\n", err);
 		currpoint = err;
 	}
 
