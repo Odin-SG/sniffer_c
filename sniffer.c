@@ -72,22 +72,32 @@ void dump (const uint8_t *buf, ssize_t numbytes, uint8_t *retBuff) {
 	}
 }
 
-int find_in_array(const struct arp_table *table, char type, const uint8_t *val){
+int find_in_array(const struct arp_table *table, char type, const uint8_t *val, const int pos){
 	int cointcid;
 	for(int step = 0; step < point; step++){
+		uint8_t isFail = 0;
+		if(val[0] == 0xDE && val[1] == 0xAD){
+			int a = 1;
+		}
 		switch(type){
 			case 'i':
 				for(int i = 0; i < IPSIZE; i++){
 					if(table[step].ip[i] != val[i])
-						return -1;
+						isFail = 1;
 				}
-				return step;
+				if(isFail == 0)
+					return step;
+				break;
 			case 'm':
 				for(int i = 0; i < MACSIZE; i++){
-					if(table[step].mac[i] != val[i])
-						return -1;
+					if(table[pos].mac[i] != val[i])
+						isFail = 1;
 				}
-				return step;
+				if(isFail == 0)
+					return pos;
+				else
+					return -1;
+				break;
 			default:
 				return -1;
 		}
@@ -99,19 +109,20 @@ void add_to_table(struct arp_table *table, uint8_t *buf){
 	int bufpoint, currpoint, err;
 	currpoint = point;
 
-	if((err = find_in_array(table, 'i',  &buf[38])) != -1){
-		if(find_in_array(table, 'm', &buf[32]) == -1)
+	if((err = find_in_array(table, 'i',  &buf[28], 0)) != -1){
+		if(find_in_array(table, 'm', &buf[22], err) == -1)
 			printf("Attack! This ip is trying to bind to this mac! Position on table %d\n", err);
 		currpoint = err;
+	} else {
+		point++;
 	}
 
 	for(bufpoint = 0; bufpoint < IPSIZE; bufpoint++){
-			table[currpoint].ip[bufpoint] = buf[38 + bufpoint];
+			table[currpoint].ip[bufpoint] = buf[28 + bufpoint];
 	}
 	for(bufpoint = 0; bufpoint < MACSIZE; bufpoint++){
-			table[currpoint].mac[bufpoint] = buf[32 + bufpoint];
+			table[currpoint].mac[bufpoint] = buf[22 + bufpoint];
 	}
-	point++;
 }
 
 void arp_dump(const uint8_t *buf, int currtime, struct ether_header *eh, uint8_t *retBuff){
