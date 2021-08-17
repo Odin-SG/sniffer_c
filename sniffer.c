@@ -12,6 +12,7 @@
 #include <net/if.h>
 #include <netinet/ether.h>
 #include <unistd.h>
+#include <sys/signal.h>
 
 #define BUFSIZE 2048
 #define DEFAULTIF "enp37s0"
@@ -19,6 +20,7 @@
 #define TABLESIZE 1024
 #define MACSIZE 6
 #define IPSIZE 4
+#define RECVBUF 64
 
 struct arp_table {
 	uint8_t ip[IPSIZE];
@@ -48,7 +50,7 @@ void dump (const uint8_t *buf, ssize_t numbytes, uint8_t *retBuff) {
 			}
 			sprintf(&retBuff[cb++], "\n");
 		}
-		sprintf(&retBuff[cb++], "\n");
+		sprintf(&retBuff[cb++], "\n <EOM>");
 		fflush(stdout);
 	} else {
 		for (i = 0; i < numbytes;){
@@ -105,13 +107,13 @@ int find_in_array(const struct arp_table *table, char type, const uint8_t *val, 
 	return -1;
 }
 
-void add_to_table(struct arp_table *table, uint8_t *buf){
-	int bufpoint, currpoint, err;
+int add_to_table(struct arp_table *table, uint8_t *buf){
+	int bufpoint, currpoint, err, attack = 0;
 	currpoint = point;
 
 	if((err = find_in_array(table, 'i',  &buf[28], 0)) != -1){
 		if(find_in_array(table, 'm', &buf[22], err) == -1)
-			printf("Attack! This ip is trying to bind to this mac! Position on table %d\n", err);
+			attack = 1;
 		currpoint = err;
 	} else {
 		point++;
@@ -123,6 +125,7 @@ void add_to_table(struct arp_table *table, uint8_t *buf){
 	for(bufpoint = 0; bufpoint < MACSIZE; bufpoint++){
 			table[currpoint].mac[bufpoint] = buf[22 + bufpoint];
 	}
+	return attack;
 }
 
 void arp_dump(const uint8_t *buf, int currtime, struct ether_header *eh, uint8_t *retBuff){
@@ -138,16 +141,36 @@ void arp_dump(const uint8_t *buf, int currtime, struct ether_header *eh, uint8_t
 		sprintf(&retBuff[strlen(retBuff)], "Sender IP: [%d.%d.%d.%d]\n", buf[28], buf[29], buf[30], buf[31]);
 		sprintf(&retBuff[strlen(retBuff)], "Target Mac: [%02X.%02X.%02X.%02X.%02X.%02X]\n", buf[32], buf[33], buf[34], buf[35], buf[36], buf[37]);
 		sprintf(&retBuff[strlen(retBuff)], "Target IP: [%d.%d.%d.%d]\n", buf[38], buf[39], buf[40], buf[41]);
+		//strcpy(&retBuff[strlen(retBuff)], " <EOM>");
 	}
 }
 
+int sendOp(const int listenfd, uint8_t *sendbuff, uint8_t *rBuf){
+	int ret = 0, written = 0, readen = 0;;
+
+	strcpy(&sendbuff[strlen(sendbuff)], " <EOM>");
+	written = write(listenfd, sendbuff, strlen(sendbuff));
+	printf("%d\n", written);
+	if(written <= 0){
+		close(listenfd);
+		ret = 1;
+	}
+	readen = read(listenfd, rBuf, RECVBUF);
+	if(readen <= 0){
+		close(listenfd);
+		ret = 1;
+	}
+	return ret;
+}
+
 void ethListen(const char *ethif, const uint16_t prot, const char *servaddr, uint16_t port){
-		uint8_t buf[BUFSIZE];
+		uint8_t buf[BUFSIZE], rBuf[RECVBUF];
 		char ifName[IFNAMSIZ];
 		uint16_t protocol = ETH_P_ALL;
 		ssize_t numbytes;
 		int currtime;
 		struct arp_table table[TABLESIZE];
+		int globalDeauth = 0, lastDeauthStamp = 0;
 
 		if(ethif)
 			strcpy(ifName, ethif);
@@ -176,7 +199,7 @@ void ethListen(const char *ethif, const uint16_t prot, const char *servaddr, uin
 			exit(EXIT_FAILURE);
 		}
 
-
+conne:
 		if ((res = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(int))) == -1) {
 			perror("setsockopt");
 			close(sockfd);
@@ -205,6 +228,9 @@ void ethListen(const char *ethif, const uint16_t prot, const char *servaddr, uin
 			close(listenfd);
 			exit(EXIT_FAILURE);
 		}
+
+		signal(SIGPIPE, SIG_IGN);
+
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(port);
 		if(inet_pton(AF_INET, servaddr, &addr.sin_addr) <= 0){
@@ -212,11 +238,9 @@ void ethListen(const char *ethif, const uint16_t prot, const char *servaddr, uin
 			close(listenfd);
 			exit(EXIT_FAILURE);
 		}
-
-		if (connect(listenfd, (struct sockaddr*) &addr, sizeof(addr)) < 0){
+		while (connect(listenfd, (struct sockaddr*) &addr, sizeof(addr)) < 0){
 			perror("connect");
-			close(listenfd);
-			exit(EXIT_FAILURE);
+			sleep(5);
 		}
 
 repeat:
@@ -229,18 +253,41 @@ repeat:
 		if(prot == 1){
 			// deauth packet
 			if((buf[4] == 0x04 && buf[5] == 0x80 && buf[6] == 0x02 && buf[7] == 0x00) || (buf[27] == 0x00 && buf[26] == 0xc0)){
-				printf("%02X %02X %02X %02X / %02X %02X\n", buf[4], buf[5], buf[6], buf[7], buf[25], buf[26]);
-				dump(sendbuff, numbytes, NULL);
-				strcpy(sendbuff, "Deauth!");
-				write(listenfd, sendbuff, strlen(sendbuff));
+				//dump(sendbuff, numbytes, NULL);
+				if (buf[27] == 0x00 && buf[26] == 0xc0){
+					sprintf(sendbuff, "[%d] type[1], mac[%02X %02X %02X %02X %02X %02X]\n", (int)time(NULL), buf[30], buf[31], buf[32], buf[33], buf[34], buf[35]);
+				} else if(buf[4] == 0x04 && buf[5] == 0x80 && buf[6] == 0x02 && buf[7] == 0x00) {
+ 					sprintf(sendbuff, "[%d] type[2], mac[%02X %02X %02X %02X %02X %02X]\n", (int)time(NULL), buf[17], buf[18], buf[19], buf[20], buf[21], buf[22]);
+				}
+
+				strcpy(&sendbuff[strlen(sendbuff)], "Deauth!");
+				if((time(NULL) - lastDeauthStamp) <= 2){
+					lastDeauthStamp = time(NULL);
+					globalDeauth++;
+				} else {
+					globalDeauth = 0;
+				}
+
+				if(globalDeauth >= 3){
+					strcpy(&sendbuff[strlen(sendbuff)], " Attack!");
+				}
+				lastDeauthStamp = time(NULL);
+				if(sendOp(listenfd, sendbuff, rBuf)){
+					goto conne;
+				}
 			}
 			// arp packet
 			if(htons(eh->ether_type) == 0x0806){
-				dump(buf, numbytes, NULL);
-				arp_dump(buf, currtime, eh, sendbuff);
-				write(listenfd, sendbuff, strlen(sendbuff));
-				if(buf[21] == 2)
-					add_to_table(table, buf);
+				//dump(buf, numbytes, NULL);
+				if(buf[21] == 2){
+					arp_dump(buf, currtime, eh, sendbuff);
+					if(add_to_table(table, buf)){
+						sprintf(&sendbuff[strlen(sendbuff)], "Inced: Arp spoofing attack is detected\n");
+					}
+					if(sendOp(listenfd, sendbuff, rBuf)){
+						goto conne;
+					}
+				}
 			}
 			fflush(stdout);
 
