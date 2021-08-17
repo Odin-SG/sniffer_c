@@ -20,7 +20,7 @@
 #define TABLESIZE 1024
 #define MACSIZE 6
 #define IPSIZE 4
-#define RECVBUF 64
+#define RECVBUF 128
 
 struct arp_table {
 	uint8_t ip[IPSIZE];
@@ -78,9 +78,7 @@ int find_in_array(const struct arp_table *table, char type, const uint8_t *val, 
 	int cointcid;
 	for(int step = 0; step < point; step++){
 		uint8_t isFail = 0;
-		if(val[0] == 0xDE && val[1] == 0xAD){
-			int a = 1;
-		}
+
 		switch(type){
 			case 'i':
 				for(int i = 0; i < IPSIZE; i++){
@@ -150,7 +148,7 @@ int sendOp(const int listenfd, uint8_t *sendbuff, uint8_t *rBuf){
 
 	strcpy(&sendbuff[strlen(sendbuff)], " <EOM>");
 	written = write(listenfd, sendbuff, strlen(sendbuff));
-	printf("%d\n", written);
+	printf("%d : ", written);
 	if(written <= 0){
 		close(listenfd);
 		ret = 1;
@@ -160,6 +158,8 @@ int sendOp(const int listenfd, uint8_t *sendbuff, uint8_t *rBuf){
 		close(listenfd);
 		ret = 1;
 	}
+	printf("%s\n", rBuf);
+	fflush(stdout);
 	return ret;
 }
 
@@ -248,6 +248,7 @@ repeat:
 		numbytes = recvfrom(sockfd, buf, BUFSIZE, 0, NULL, NULL);
 		currtime = (int)time(NULL);
 		memset(sendbuff, 0, sizeof(sendbuff));
+		memset(rBuf, 0, sizeof(rBuf));
 
 		// Type param 1 capture all packet (arp and deuath)
 		if(prot == 1){
