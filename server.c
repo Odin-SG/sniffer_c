@@ -14,6 +14,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in serv_addr;
 
     char sendBuff[2048];
+	char buf[128];
 	int sockopt = 1;
 
     listenfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -35,8 +36,13 @@ int main(int argc, char *argv[]) {
     listen(listenfd, 10);
 
 	connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
+
     while(read(connfd, sendBuff, sizeof(sendBuff)-1) > 0) {
 		printf("%s\n", sendBuff);
 		memset(sendBuff, 0, sizeof(sendBuff));
+		sprintf(buf, "[%ld]\n", time(NULL));
+		if(write(connfd, buf, strlen(buf)) < 1) {
+			printf("Packet is not sent\n");
+		}
      }
 }
